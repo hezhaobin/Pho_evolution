@@ -1,0 +1,323 @@
+Growth curve analysis | data: 08/17/2013
+========================================================
+This script does some data plotting and quality check
+for my first Bioscreen-C experiment  
+hebin  
+17 auot 2013  
+
+Read data
+------------------
+Notes:  
+* change the working directory
+* replace the filename with the appropriate name
+```{r Read bioscreen data, cache=TRUE}
+raw <- read.csv("BioscreenExperiment20130816.csv")
+# note: each column is temporal data for one well
+data <- as.matrix(raw[,-1])
+```
+
+Design matrix
+------------------
+* define the strains
+* define all factors involved
+* setup the design matrix
+```{r Create design matrix,echo=FALSE}
+# --------------------------
+# create the design matrix
+# 1. change the number of strains 
+#    and conditions here
+n.strain = 20
+n.condition = 10
+# 2. name the strains used, including biological replicates
+ST <- c("wt", "pho80-1", "pho80-2", "pho4", "pho80.scPho4-1", "pho80.scPho4-2", "empty")
+# 3. give the order of strains, including technical replicates
+strain <- rep( c( rep(ST[1:3],each=3), ST[7], 
+                  rep(ST[4:6],each=3), ST[7] ), n.condition )
+# 4. name the factors
+factors <- c("Glucose","Pi","Rapamycin")
+# 5. give the conditions for one strain, then replicate for all
+condition <- list("Glucose"=factor(c(rep("2%",4), rep("0.5%",3), rep("2%",3)), levels=c("2%","0.5%")),
+                  "Pi"=factor(paste(c(10,1,0.1,0,10,1,0.1,10,10,1),"mM",sep="")),
+                  "Rapamycin"=factor(paste(c(rep(0,7),10,50,10),"ng/ml",sep="")))
+conditions <- data.frame(condition) [ rep(seq_len(n.condition),each=n.strain), ]
+# 6. finally, synthesize into a design matrix
+design.mat <- data.frame(strain, conditions)
+# 7. Optionally, give the time points
+Time <- seq(0,24,0.25)
+cat("Strains\n")
+print(ST)
+cat("Each strain is tested in the following 10 conditions\n")
+print(unique(conditions))
+```
+
+Functions
+-----------------
+1. Subfunction to summarize the data by calculating the mean and sd of tech. repl.
+```{r Sub1, echo=FALSE}
+myMeanSD <- function(x, d){
+  # Purpose ==
+  #   summarize the data by calculating the mean and sd of tech. repl.
+  # Input ==
+  #   x: data matrix
+  #   d: design matrix
+  # Output ==
+  #   A list consisting of two arrays: mean and sd
+  
+  # combining the different conditions into a single factor
+  d.tmp <- apply(d, 1, function(y) paste(y, collapse="  "))
+  d.as.factor <- factor(d.tmp, levels=unique(d.tmp), ordered=TRUE)
+  # calculate mean and sd
+  mean <- apply(x,1,function(z) tapply(z,d.as.factor,mean))
+  sd   <- apply(x,1,function(z) tapply(z,d.as.factor,sd  ))
+  # recover the design matrix
+  tmp  <- rownames(mean) # a vector of strings separated by "|"
+  new.d <- sapply(tmp, function(z) strsplit(z,"  ")[[1]])
+  new.d <- data.frame(t(new.d))
+  colnames(new.d) <- names(d); rownames(new.d) <- NULL
+  return(list("mean"=mean,"sd"=sd,"design.mat"=new.d))
+}
+```
+
+2. A function to visualize the time course for any given strain at a particular condition
+```{r Sub2,echo=FALSE}
+plotTrace <- function(x, d, strain, cond, ylim=NA, lwd=1){
+# Input ==
+#   x: data matrix
+#   d: design matrix
+#   strain: strain id, or "all"
+#   cond: a vector of conditions to look at
+# Output ==
+#   Line plot
+  
+  # limit to the strain(s)
+  if(strain[1] == "all"){
+    strain = levels(d$strain)
+  }
+  choose = d$strain %in% strain
+  # limit to the designated conditions
+  # assume factors and condition are global variables
+  for ( z in factors ){
+    tmp = d[,z] %in% condition[[z]][cond]
+    choose = choose & tmp
+  }
+  # prepare data for plot
+  x.plot <- x[,choose]
+  d.plot <- d[choose,]
+  d.tmp <- apply(d.plot[,-1], 1, function(y) paste(y, collapse=" "))
+  d.as.factor <- factor(d.tmp, levels=unique(d.tmp), ordered=TRUE)
+  strain.as.factor = factor(d.plot[,1], levels=unique(d.plot[,1], ordered=TRUE))
+  if( is.na(ylim) ){
+    ylim = range(x.plot)
+  }
+  thin <- seq.int(1L,nrow(x),20L)
+  # change layout
+  layout(matrix(1:3,ncol=1),heights=c(6,1,1))
+  # plot main figure
+  oldpar <- par(mar=c(5,5,2,2))
+  plot(Time, x.plot[,1], type="l", ylim=ylim, lwd=lwd, col=as.numeric(d.as.factor[1]), 
+       xlab="Time (hr)", ylab="OD600",cex.lab=1.3, cex.axis=1.2, main="Growth curve")
+  points(Time[thin], x.plot[thin,1], pch=as.numeric(strain.as.factor[1]),cex=1.2,
+         col=as.numeric(d.as.factor[1]))
+  for ( j in 2:ncol(x.plot) ){
+    lines(Time, x.plot[,j], ylim=ylim, lwd=lwd, col=rep(1:6,3)[as.numeric(d.as.factor[j])], 
+          lty=rep(1:3,each=6)[as.numeric(d.as.factor[j])]) 
+    points(Time[thin], x.plot[thin,j], pch=as.numeric(strain.as.factor[j]),cex=1.2,
+           col=rep(1:6,3)[as.numeric(d.as.factor[j])] )
+  }
+  # plot legend for condition
+  par(mar=rep(0,4))
+  plot.new()
+  legend("center","groups",legend=levels(d.as.factor),cex=1.3,bty="n",
+         col=rep(1:6,3)[1:length(unique(d.as.factor))],
+         title=paste(names(d.plot)[-1],collapse="/"),
+         ncol=min( 4, length( unique(d.as.factor) ) ),
+         lty=rep(1:3,each=6)[1:length(unique(d.as.factor))] )
+  # plot legend for strain
+  plot.new()
+  legend("center","groups",legend=levels(strain.as.factor),lty=1,cex=1.3,bty="n",
+         pch=1:length(unique(strain.as.factor)),
+         title="Strains",ncol=min(4,length(unique(strain.as.factor))))
+  par(oldpar)
+}
+```
+
+3. Based on plotTrace, but plot the mean of tech. repl.
+```{r Sub3,echo=FALSE}
+plotMeanTrace <- function(X, strain, cond, title="", ylim=NA, lwd=1){
+# Purpose ==
+#   Similar to plotTrace, but use summary of tech. repl.
+# Input ==
+#   X: output of myMeanSD, contains three elements -- mean, sd, (new)design.mat
+#   strain: strain id, or "all"
+#   cond: a vector of conditions to look at
+# Output ==
+#   Line plot
+# Note ==
+#   Now configured to plot the mean of the tech. repl.
+  
+  # limit to the strain(s)
+  mean = t(X$mean); sd = t(X$sd); d = X$design.mat
+  if(strain[1] == "all"){
+    strain = levels(d$strain)
+  }
+  choose = d$strain %in% strain
+  # limit to the designated conditions
+  # assume factors and condition are global variables
+  for ( z in factors ){
+    tmp = d[,z] %in% condition[[z]][cond]
+    choose = choose & tmp
+  }
+  # prepare data for plot
+  mean.plot <- mean[,choose]
+  sd.plot <- sd[,choose]
+  d.plot <- d[choose,]
+  d.tmp <- apply(d.plot[,-1], 1, function(y) paste(y, collapse=" "))
+  d.as.factor <- factor(d.tmp, levels=unique(d.tmp), ordered=TRUE)
+  strain.as.factor = factor(d.plot[,1])
+  if( is.na(ylim[1]) ){
+    ylim = range(mean.plot)
+  }
+  thin <- seq.int(1L,nrow(mean.plot),20L)
+  # change layout
+  layout(matrix(1:3,ncol=1),heights=c(6,1,1))
+  # plot main figure
+  oldpar <- par(mar=c(5,5,2,2))
+  plot(Time, mean.plot[,1], type="l", ylim=ylim, lwd=lwd, col=as.numeric(d.as.factor[1]),
+       xlab="Time (hr)", ylab="OD600",cex.lab=1.3, cex.axis=1.2, main=title, cex.main=1.5)
+  points(Time[thin], mean.plot[thin,1], pch=as.numeric(strain.as.factor[1]),cex=1.2,
+         col=as.numeric(d.as.factor[1]))
+  arrows(Time[thin], mean.plot[thin,1]-sd.plot[thin,1], Time[thin], mean.plot[thin,1]+sd.plot[thin,1], 
+         length=0.02, angle=90, code=3, lwd=0.5,
+         col=as.numeric(d.as.factor[1]))
+  for ( j in 2:ncol(mean.plot) ){
+    lines(Time, mean.plot[,j], ylim=ylim, lwd=lwd, col=rep(1:6,3)[as.numeric(d.as.factor[j])], 
+          lty=rep(1:3,each=6)[as.numeric(d.as.factor[j])]) 
+    points(Time[thin], mean.plot[thin,j], pch=as.numeric(strain.as.factor[j]),cex=1.2,
+           col=rep(1:6,3)[as.numeric(d.as.factor[j])] )
+    arrows(Time[thin], mean.plot[thin,j]-sd.plot[thin,j], Time[thin], mean.plot[thin,j]+sd.plot[thin,j], 
+         length=0.02, angle=90, code=3, lwd=0.5, 
+         col=as.numeric(d.as.factor[j]))
+  
+  }
+  # plot legend for condition
+  par(mar=c(0,0,0,0))
+  plot.new()
+  legend("center","groups",legend=levels(d.as.factor),cex=1.3,bg=rgb(1,1,0,0.3),
+         col=rep(1:6,3)[1:length(unique(d.as.factor))],
+         title=paste(names(d.plot)[-1],collapse="/"),
+         ncol=min( 4, length( unique(d.as.factor) ) ),
+         lty=rep(1:3,each=6)[1:length(unique(d.as.factor))] )
+  # plot legend for strain
+  plot.new()
+  legend("center","groups",legend=levels(strain.as.factor),lty=1,cex=1.3,bg=rgb(1,1,0,0.3),
+         pch=1:length(unique(strain.as.factor)),
+         title="Strains",ncol=min(4,length(unique(strain.as.factor))))
+  par(oldpar)
+}
+plainMeanTrace <- function(X, strain, cond, title="", ylim=NA, lwd=1){
+# Purpose ==
+#   Same as plotMeanTrace, except it doesn't try to plot the legend
+# Input ==
+#   X: output of myMeanSD, contains three elements -- mean, sd, (new)design.mat
+#   strain: strain id, or "all"
+#   cond: a vector of conditions to look at
+# Output ==
+#   Line plot
+# Note ==
+#   Now configured to plot the mean of the tech. repl.
+  
+  # limit to the strain(s)
+  mean = t(X$mean); sd = t(X$sd); d = X$design.mat
+  if(strain[1] == "all"){
+    strain = levels(d$strain)
+  }
+  choose = d$strain %in% strain
+  # limit to the designated conditions
+  # assume factors and condition are global variables
+  for ( z in factors ){
+    tmp = d[,z] %in% condition[[z]][cond]
+    choose = choose & tmp
+  }
+  # prepare data for plot
+  mean.plot <- mean[,choose]
+  sd.plot <- sd[,choose]
+  d.plot <- d[choose,]
+  d.tmp <- apply(d.plot[,-1], 1, function(y) paste(y, collapse=" "))
+  d.as.factor <- factor(d.tmp, levels=unique(d.tmp), ordered=TRUE)
+  strain.as.factor = factor(d.plot[,1])
+  if( is.na(ylim[1]) ){
+    ylim = range(mean.plot)
+  }
+  thin <- seq.int(1L,nrow(mean.plot),20L)
+  # plot main figure
+  oldpar <- par(mar=c(5,5,2,2))
+  plot(Time, mean.plot[,1], type="l", ylim=ylim, lwd=lwd, col=as.numeric(d.as.factor[1]),
+       xlab="Time (hr)", ylab="OD600",cex.lab=1.3, cex.axis=1.2, main=title, cex.main=1.5)
+  points(Time[thin], mean.plot[thin,1], pch=as.numeric(strain.as.factor[1]),cex=1.2,
+         col=as.numeric(d.as.factor[1]))
+  arrows(Time[thin], mean.plot[thin,1]-sd.plot[thin,1], Time[thin], mean.plot[thin,1]+sd.plot[thin,1], 
+         length=0.02, angle=90, code=3, lwd=0.5, 
+         col=as.numeric(d.as.factor[1]))
+  for ( j in 2:ncol(mean.plot) ){
+    lines(Time, mean.plot[,j], ylim=ylim, lwd=lwd, col=rep(1:6,3)[as.numeric(d.as.factor[j])], 
+          lty=rep(1:3,each=6)[as.numeric(d.as.factor[j])]) 
+    points(Time[thin], mean.plot[thin,j], pch=as.numeric(strain.as.factor[j]),cex=1.2,
+           col=rep(1:6,3)[as.numeric(d.as.factor[j])] )
+    arrows(Time[thin], mean.plot[thin,j]-sd.plot[thin,j], Time[thin], mean.plot[thin,j]+sd.plot[thin,j], 
+         length=0.02, angle=90, code=3, lwd=0.5, 
+         col=as.numeric(d.as.factor[j]))
+  }
+  # plot legend for conditons
+  legend("topleft",legend=levels(d.as.factor),
+         col=rep(1:6,3)[1:length(unique(d.as.factor))],
+         title=paste(names(d.plot)[-1],collapse="/"),
+         lty=rep(1:3,each=6)[1:length(unique(d.as.factor))] )
+  # plot legend for strain
+  legend("bottomright",legend=levels(strain.as.factor),lty=1,
+         pch=1:length(unique(strain.as.factor)),
+         title="Strains")
+  par(oldpar)
+}
+```
+
+Analyses
+-----------------
+### 1. Quality check
+#### _Negative controls_
+The last well of each column has no cells in it. Plotting the OD of the 20 empty wells should be background.
+```{r negative controls, fig.width=10, fig.height=7.5, warning=FALSE}
+x = myMeanSD(data, design.mat)
+plotMeanTrace(x, "empty", 1:10, title="Empty wells", lwd=1.5)
+```
+
+#### _But something is wrong with the first column_
+Notice the flat line including the wt, the two pho80 strain, all of which are in the first column
+Also notice that the rest three strains shared a similar pattern, i.e. there is a peak at ~6h, then a drop, followed by a recovery. In the case of pho80.scPHO4, there is a subsequent drop. The _pho4_ strain seems to do particularly well in this condition. By the end it still doesn't seem to saturate.  
+```{r first column problem, warning=FALSE}
+plotMeanTrace(x, "all", 1, lwd=1.5, title="First column problem")
+```
+
+#### _Starved for Pi_
+The biological replicates (pho80 and pho80.scPHO4) are quite similar. From now on I just plot one of them
+```{r Pi starvation, warning=FALSE, fig.width=12, fig.height=6}
+st.use <- c("wt","pho80-1","pho4","pho80.scPho4-1")
+layout(matrix(c(1,2),ncol=2))
+plainMeanTrace(x, st.use, c(2:3), lwd=1.5, title="Low Pi")
+plainMeanTrace(x, st.use, 4, lwd=1.5, title="No Pi")
+```
+
+#### _Starved for Glucose (and Pi)_
+```{r Glucose and Pi starvation, warning=FALSE, fig.width=12,fig.height=6}
+layout(matrix(c(1,2),ncol=2))
+plainMeanTrace(x, st.use, 5, lwd=1.5, ylim=c(0.06,1.2), title="Low Glucose")
+plainMeanTrace(x, st.use, c(6,7), lwd=1.5, ylim=c(0.06,1.2), title="Low Glucose + Low Pi")
+```
+
+#### _Comparison grouped by strains, not conditions_
+```{r Grouped by strains, warning=FALSE, fig.width=12, fig.height=12}
+layout( matrix(c(1:4), byrow=TRUE, ncol=2) )
+plainMeanTrace(x, "wt", 1:7, lwd=1.5, ylim=c(0.06,1.2), title="wt")
+plainMeanTrace(x, "pho80-1", 1:7, lwd=1.5, ylim=c(0.06,1.2), title="pho80")
+plainMeanTrace(x, "pho80.scPho4-1", 1:7, lwd=1.5, ylim=c(0.06,1.2), title="pho80.scPho4")
+plainMeanTrace(x, "pho4", 1:7, lwd=1.5, ylim=c(0.06,1.2), title="pho4")
+```
