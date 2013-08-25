@@ -3,7 +3,12 @@ Growth curve analysis | data: 08/17/2013
 This script does some data plotting and quality check
 for my first Bioscreen-C experiment  
 hebin  
-17 auot 2013  
+17 aug 2013  
+
+Summary
+------------------
+1. The rich media condition is abnormal -- the first column on plate A didn't grow / _pho4_ (CG3) grows the best under this condition / the saturation yield of _pho4_ is the highest among all experimental conditions
+2. 
 
 Read data
 ------------------
@@ -43,7 +48,7 @@ conditions <- data.frame(condition) [ rep(seq_len(n.condition),each=n.strain), ]
 # 6. finally, synthesize into a design matrix
 design.mat <- data.frame(strain, conditions)
 # 7. Optionally, give the time points
-Time <- seq(0,24,0.25)
+Time <- seq(0,24,0.25); attr(Time, "unit") <- "hr"
 cat("Strains\n")
 print(ST)
 cat("Each strain is tested in the following 10 conditions\n")
@@ -52,7 +57,9 @@ print(unique(conditions))
 
 Functions
 -----------------
-1. Subfunction to summarize the data by calculating the mean and sd of tech. repl.
+1. Subfunction to summarize, extract data
+`myMeanSD <- function(x, d)`  
+`extract1Col <- function(x, d, cond, strain, index, range=c(1:10))`
 ```{r Sub1, echo=FALSE}
 myMeanSD <- function(x, d){
   # Purpose ==
@@ -76,9 +83,60 @@ myMeanSD <- function(x, d){
   colnames(new.d) <- names(d); rownames(new.d) <- NULL
   return(list("mean"=mean,"sd"=sd,"design.mat"=new.d))
 }
+extractCol <- function(x, d, strain, cond, index=1, range=c(2:25)){
+  # Input ===
+  #   x: raw data matrix
+  #   d: design matrix
+  #   strain: asis
+  #   cond: a number as the index of the condition in the list "condition"
+  #   index: index for which technical replicate to return, e.g. 1/2/3
+
+  choose = d$strain %in% strain
+  # limit to the designated conditions
+  # assume factors and condition are global variables
+  for ( z in factors ){
+    tmp = d[,z] %in% condition[[z]][cond]
+    choose = choose & tmp
+  }
+  x.tmp = x[range,choose]
+  x.return = data.frame(od=x.tmp[,index], t=Time[range])
+  return( x.return )
+}
 ```
 
-2. A function to visualize the time course for any given strain at a particular condition
+2. Simple plotting function
+`simplot <- function(ex, mode="basic")`
+```{r Sub1.1, echo=FALSE}
+simplot <- function(ex, mode="basic"){
+  # Input ==
+  #   ex: a dataframe of extracted OD values and the corresponding time points
+  #   mode: "basic"-simple x-y plot; "log"-y on log scale; "derivative"-first derivative using adjacent pair of values
+  if( class(mode) == "character" ){
+    mode = as.numeric(factor(mode, levels=c("basic","log","derivative")))
+  }
+  if( is.na(mode) ){
+    warning("Mode should be basic/log/derivative")
+  }
+  if( mode == 2 | mode == 3 ){
+    x = log2(ex$od/ex$od[1])
+  }
+  # basic
+  if( mode == 1 ){
+    plot(ex$t, ex$od, xlab=paste("Time", attr(ex$t,"unit")), ylab="OD600")
+  }
+  else if( mode == 2 ){
+    plot(ex$t, x, xlab=paste("Time", attr(ex$t,"unit")), ylab="log2( normalized OD )")
+  }
+  # derivative
+  else if( mode == 3 ){
+    x.diff = x[-1] - x[-length(x)]
+    plot(ex$t[-1], x.diff, xlab=paste("Time", attr(ex$t,"unit")), ylab="d_Log2(OD600)")
+  }
+}
+```
+
+2. A function to visualize the time course for any given strain at a particular condition  
+`plotTrace <- function(x, d, strain, cond, ylim=NA, lwd=1)`  
 ```{r Sub2,echo=FALSE}
 plotTrace <- function(x, d, strain, cond, ylim=NA, lwd=1){
 # Input ==
@@ -141,7 +199,10 @@ plotTrace <- function(x, d, strain, cond, ylim=NA, lwd=1){
 }
 ```
 
-3. Based on plotTrace, but plot the mean of tech. repl.
+3. Based on plotTrace, but plot the mean of tech. repl.  
+`plotMeanTrace <- function(X, strain, cond, title="", ylim=NA, lwd=1)`  
+`plainMeanTrace <- function(X, strain, cond, title="", ylim=NA, lwd=1)`  
+  _Same as plotMeanTrace, except it doesn't try to plot the legend_
 ```{r Sub3,echo=FALSE}
 plotMeanTrace <- function(X, strain, cond, title="", ylim=NA, lwd=1){
 # Purpose ==
@@ -280,24 +341,72 @@ plainMeanTrace <- function(X, strain, cond, title="", ylim=NA, lwd=1){
 }
 ```
 
-Analyses
+4. Estimate growth rate
+```{r Sub4, echo=FALSE}
+growthRate <- function(ex, mode=1, plot=TRUE){
+  # Purpose ==
+  #   Estimate the doubling time from growth curve
+  # Input ==
+  #   ex: data frame, with od and time
+  #   mode: 1 or 2, decide the type of diagnostic plot to output
+  # Output ==
+  #   0. return two stats: growth rate and yield
+  #   1. plot either the log2(OD)~Time and show the linear fit (mode=1) or plot the Growth rate in units of min per doubling by calculating the slope based on any adjacent pair of points (mode=2)
+  #   2. If mode=1, return the doubling time in unit of min
+  ex.log = log2(ex$od/ex$od[1]); time = ex$t
+  if( mode == 1 ){
+    fit <- lm(ex.log~time)
+    if( plot ){
+      simplot(ex, mode=2)
+      abline(fit, col="red", lwd=.5)
+      legend("topleft",bty="n",
+             legend=gettextf("y = %.2f + %.2f x",coef(fit)[1], coef(fit)[2]))
+    }
+    doubling.time <- 1/coef(fit)[2]*60
+  }
+  else if( mode == 2 ){
+    if( plot ){ simplot(ex, mode=3) }
+    ex.diff = ex.log[-1]-ex.log[-length(ex.log)]
+    t.diff = time[-1] - time[-length(time)]
+    # find out the maximum rate, or minimum doubling time
+    if( sum(ex.diff<0) >= 8 ){
+      min.time <- -1000
+    }
+    else{
+      i.min <- which.max(ex.diff)
+      min.time <- t.diff[i.min] / ex.diff[i.min]
+    }
+    # return the minimum doubling time
+    doubling.time <- min.time * 60
+  }
+  return( "doubling time" = doubling.time )
+}
+```
+
+Analyse
 -----------------
 ### 1. Quality check
-#### _Negative controls_
+### _Negative controls_
 The last well of each column has no cells in it. Plotting the OD of the 20 empty wells should be background.
+Notice that rapamycin adds to the background. My current analysis didn't remove the background.
 ```{r negative controls, fig.width=10, fig.height=7.5, warning=FALSE}
 x = myMeanSD(data, design.mat)
 plotMeanTrace(x, "empty", 1:10, title="Empty wells", lwd=1.5)
 ```
 
-#### _But something is wrong with the first column_
+### _But something is wrong with the first column_
 Notice the flat line including the wt, the two pho80 strain, all of which are in the first column
 Also notice that the rest three strains shared a similar pattern, i.e. there is a peak at ~6h, then a drop, followed by a recovery. In the case of pho80.scPHO4, there is a subsequent drop. The _pho4_ strain seems to do particularly well in this condition. By the end it still doesn't seem to saturate.  
 ```{r first column problem, warning=FALSE}
 plotMeanTrace(x, "all", 1, lwd=1.5, title="First column problem")
 ```
+__Questions 1.__ Why is there a drop in OD at ~6hr, what is limiting?
+_Calculate the rate of Pi consumption in rich media_
+My estimate 
 
-#### _Starved for Pi_
+
+### 2. Overview and comparisons between strains / conditions
+### _Starved for Pi_
 The biological replicates (pho80 and pho80.scPHO4) are quite similar. From now on I just plot one of them
 ```{r Pi starvation, warning=FALSE, fig.width=12, fig.height=6}
 st.use <- c("wt","pho80-1","pho4","pho80.scPho4-1")
@@ -306,14 +415,14 @@ plainMeanTrace(x, st.use, c(2:3), lwd=1.5, title="Low Pi")
 plainMeanTrace(x, st.use, 4, lwd=1.5, title="No Pi")
 ```
 
-#### _Starved for Glucose (and Pi)_
+### _Starved for Glucose (and Pi)_
 ```{r Glucose and Pi starvation, warning=FALSE, fig.width=12,fig.height=6}
 layout(matrix(c(1,2),ncol=2))
 plainMeanTrace(x, st.use, 5, lwd=1.5, ylim=c(0.06,1.2), title="Low Glucose")
 plainMeanTrace(x, st.use, c(6,7), lwd=1.5, ylim=c(0.06,1.2), title="Low Glucose + Low Pi")
 ```
 
-#### _Comparison grouped by strains, not conditions_
+### _Comparison grouped by strains, not conditions_
 ```{r Grouped by strains, warning=FALSE, fig.width=12, fig.height=12}
 layout( matrix(c(1:4), byrow=TRUE, ncol=2) )
 plainMeanTrace(x, "wt", 1:7, lwd=1.5, ylim=c(0.06,1.2), title="wt")
@@ -321,3 +430,97 @@ plainMeanTrace(x, "pho80-1", 1:7, lwd=1.5, ylim=c(0.06,1.2), title="pho80")
 plainMeanTrace(x, "pho80.scPho4-1", 1:7, lwd=1.5, ylim=c(0.06,1.2), title="pho80.scPho4")
 plainMeanTrace(x, "pho4", 1:7, lwd=1.5, ylim=c(0.06,1.2), title="pho4")
 ```
+
+### 3. Estimate growth rate from the curve
+In this section, I'd like to compute two statistics for each growth curve
+(1) Growth rate during the exponential stage, and
+(2) Final biomass yield
+
+For #1, the procedures are as follows
+* Determine the linear range (there should be little lag time)
+* Linear fit on log2(OD) ~ Time(hr)
+* Extract the doubling time by calculating 1/coef(fit)[2]
+* An alternative method is to calculate the derivative at discreet time points and take the maximum rate
+
+For #2, I will measure the rate at 20hr time point
+```{r Measure growth rates, echo=FALSE, fig.width=12, fig.height=18, cache=TRUE}
+# Prepare data   
+# a===============a
+# parameters for calculating. vary them as needed
+range <- c(2:20)
+t.yield <- 20 # sample at 20hr point
+i.yield <- which( Time==t.yield )
+# calculate yield
+yield <- log2( data[i.yield,] / data[2,] )
+# define subfunction for apply
+calc <- function(x,range,mode=2) {
+  ex <- data.frame(od=x[range], t=Time[range])
+  tmp.max.rate <- growthRate(ex, mode, plot=FALSE)
+  return(tmp.max.rate)
+}
+# calculate max.rate using growthRate(..., mode=2)
+max.rate <- apply(data,2,calc,range)
+# calculate the mean / sd of the max.rate and yield
+meanRate <- myMeanSD(rbind(max.rate),design.mat)
+meanYield <- myMeanSD(rbind(yield),design.mat)
+
+# Plot data  
+# a==============a
+# barplot, limit to the first 4 conditions
+layout(matrix(c(1,2,3),nrow=3))
+par(cex.axis=1.5,cex.lab=1.5,cex.main=1.8)->oldpar
+# 0. prepare data
+strain.remove <- which(unique(meanRate$design.mat$strain) == "empty")
+cond.use <- 1:7
+# 1. growth rate
+rate.plot <- matrix(meanRate$mean, nrow=length(ST))[-strain.remove,cond.use]
+rate.plot[1:3,1] <- rep(NA,3)
+rate.sd <- matrix(meanRate$sd, nrow=length(ST))[-strain.remove,cond.use]
+rownames(rate.plot) <- as.character(unique(meanRate$design.mat$strain)[-strain.remove])
+colnames(rate.plot) <- unique( paste(meanRate$design.mat[,"Glucose"], 
+                                     meanRate$design.mat[,"Pi"]) )[cond.use]
+colors <- c(gray(.5),"orange2","green3","blue3")[c(1,2,2,3,4,4)]
+pos <- barplot(rate.plot,beside=TRUE,col=colors,ylim=c(40,160), xpd=FALSE, xlab="Condition = Glucose + Phosphate", ylab="min", main="Minimum doubling time", names.arg=NULL)
+arrows( pos, rate.plot, pos, rate.plot+rate.sd, angle=90, length=.08, lwd=.8)
+legend("topleft",legend=rownames(rate.plot), fill=colors, cex=1.5)
+abline(h=seq(40,160,20),col=gray(.7), lwd=.6)
+
+# 2. yield at 20hr
+yield.plot <- matrix(meanYield$mean, nrow=length(ST))[-strain.remove,cond.use]
+yield.sd <- matrix(meanYield$sd, nrow=length(ST))[-strain.remove,cond.use]
+rownames(yield.plot) <- as.character(unique(meanYield$design.mat$strain)[-strain.remove])
+colnames(yield.plot) <- unique( paste(meanYield$design.mat[,"Glucose"], 
+                                      meanYield$design.mat[,"Pi"]) )[cond.use]
+pos <- barplot(yield.plot,beside=TRUE,col=colors, xpd=FALSE, ylim=c(0,4), 
+               xlab="Condition = Glucose + Phosphate", ylab="log2 OD(20hr) / OD(init)",
+               main="Yield relative to T0 at 20hr") 
+arrows( pos, yield.plot, pos, yield.plot+yield.sd, angle=90, length=.08, lwd=.8)
+
+# 3. log fit curve
+start.t <- 6 # start from 1.5 hr measurement
+end.rng <- 12:20 # try several different range
+log.fit.rate <- numeric(ncol(data))
+log.fit.rate <- apply(data, 2, function(x) {
+  arr.log.fit <- sapply(end.rng, function(j) calc(x, start.t:j,mode=1))
+  return(min(arr.log.fit))
+  } )
+# special treatment for No Pi
+noPi <- apply(data[,61:80], 2, function(x) {
+  arr.log.fit <- sapply(8:12, function(j) calc(x, 2:j,mode=1))
+  return(min(arr.log.fit))
+  } )
+log.fit.rate[61:80] <- noPi
+meanLogRate = myMeanSD(rbind(log.fit.rate), design.mat)
+# plot
+log.rate.plot <- matrix(meanLogRate$mean, nrow=length(ST))[-strain.remove,cond.use]
+log.rate.sd <- matrix(meanLogRate$sd, nrow=length(ST))[-strain.remove,cond.use]
+rownames(log.rate.plot) <- as.character(unique(meanRate$design.mat$strain)[-strain.remove])
+colnames(log.rate.plot) <- unique( paste(meanLogRate$design.mat[,"Glucose"], 
+                                         meanLogRate$design.mat[,"Pi"]) )[cond.use]
+# remove the first three values in the 1st column
+log.rate.plot[1:3,1] <- rep(NA,3)
+pos <- barplot(log.rate.plot,beside=TRUE,col=colors, ylim=c(60,200), xpd=FALSE, xlab="Condition = Glucose + Phosphate", ylab="min", main="Log linear fit doubling time", names.arg=NULL)
+arrows( pos, log.rate.plot, pos, log.rate.plot+log.rate.sd, angle=90, length=.08, lwd=.8)
+abline(h=seq(60,200,20),col=gray(.7), lwd=.6 )
+```
+#### Example: 
