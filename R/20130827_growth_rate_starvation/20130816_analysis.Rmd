@@ -1,0 +1,272 @@
+Growth curve analysis | data: 08/27/2013
+========================================================
+This script does some data plotting and quality check
+for my first Bioscreen-C experiment  
+hebin  
+29 aug 2013  
+
+Summary
+------------------
+
+Read data
+------------------
+Notes:  
+* change the working directory
+* replace the filename with the appropriate name
+```{r Read bioscreen data, cache=TRUE}
+raw <- read.csv("BioscreenExperiment20130827.csv")
+# note: each column is temporal data for one well
+
+data <- as.matrix(raw[,-1])
+data <- data[-c(1,nrow(data)),-c(1:10,91:100)] # the left and right are left blank
+Time <- seq(0.25,25.75,0.25); attr(Time, "unit") <- "hr"
+```
+
+Design matrix
+------------------
+* define the strains
+* define all factors involved
+* setup the design matrix
+```{r Create design matrix,echo=FALSE}
+# --------------------------
+# create the design matrix
+# 1. change the number of strains 
+#    and conditions here
+n.strain = 20
+n.condition = 4 
+# 2. name the strains used, including biological replicates
+ST <- c("wt", "pho80-1", "pho80-2", "pho4", "pho80.scPho4-1", "pho80.scPho4-2", "empty")
+# 3. give the order of strains, including technical replicates
+strain <- rep( c( rep(ST[1:3],each=3), ST[7], 
+                  rep(ST[4:6],each=3), ST[7] ), n.condition )
+# 4. name the factors
+condition <- c("YPD","YPD+5mM Pi","SD 1mM Pi","SD 10mM Pi")
+# 5. give the conditions for one strain, then replicate for all
+conditions <- condition[ rep(seq_len(n.condition),each=n.strain) ]
+# 6. finally, synthesize into a design matrix
+design.mat <- data.frame(strain, condition=conditions)
+# 7. Optionally, give the time points
+cat("Strains\n")
+print(ST)
+cat("Each strain is tested in the following 10 conditions\n")
+print(unique(conditions))
+```
+
+Functions
+-----------------
+1. Extract data
+`getWell <- function(cond, strain, index, range=c(1:10))` extract one well's time series
+`getExp <- function(strain, cond, range=NA)`  extract all tech. repl. of one strain x condition
+```{r Sub1, echo=FALSE}
+getWell <- function(strain, cond, index=1, range=c(2:25)){
+  # Input ===
+  #   x: raw data matrix. default: data
+  #   d: design matrix. default: design.mat
+  #   strain: asis
+  #   cond: a number as the index of the condition in the list "condition"
+  #   index: index for which technical replicate to return, e.g. 1/2/3
+  x = data; d = design.mat
+  choose = d$strain %in% strain & d$condition %in% condition[cond]
+  x.tmp = x[range,choose]
+  x.return = data.frame(t=Time[range], od=x.tmp[,index])
+  return( x.return )
+}
+getExp <- function(strain, cond, range=NA){
+  # Input ===
+  #   x: raw data matrix. default: data
+  #   d: design matrix. default: design.mat
+  #   strain: asis
+  #   cond: a number as the index of the condition in the list "condition"
+  #   index: index for which technical replicate to return, e.g. 1/2/3
+  # Output ===
+  #   Matrix containing the rows
+  x = data; d = design.mat
+  if( is.na(range[1]) ){
+    range = 2:nrow(x)
+  }
+  choose = d$strain %in% strain & d$condition %in% condition[cond]
+  x.tmp = x[range,choose]
+  x.return = cbind(t=Time[range],x.tmp)
+  return( x.return )
+}
+```
+
+2. Subfunction to summarize data
+`myMeanSD <- function(x, d)`  summarize data
+`myMelt <- function(x, d)`  summarize data
+```{r Sub2, echo=FALSE}
+require(reshape2)
+myMeanSD <- function(x, d){
+  # Purpose ==
+  #   summarize the data by calculating the mean and sd of tech. repl.
+  # Input ==
+  #   x: melted data frame
+  #   d: design matrix
+  # Output ==
+  #   A data frame containing the mean, sd and ranges of each strain x condition combination at each time point
+  
+  # combining the different conditions into a single factor
+  d.tmp <- apply(d, 1, function(y) paste(y, collapse="  "))
+  d.as.factor <- factor(d.tmp, levels=unique(d.tmp), ordered=TRUE)
+  # calculate mean and sd
+  mean <- apply(x,1,function(z) tapply(z,d.as.factor,mean))
+  sd   <- apply(x,1,function(z) tapply(z,d.as.factor,sd  ))
+  # recover the design matrix
+  tmp  <- rownames(mean) # a vector of strings separated by "  "
+  new.d <- sapply(tmp, function(z) strsplit(z,"  ")[[1]])
+  new.d <- data.frame(t(new.d))
+  colnames(new.d) <- names(d); rownames(new.d) <- NULL
+  return(list("mean"=mean,"sd"=sd,"design.mat"=new.d))
+}
+myMelt <- function(x, d, t=Time){
+  ## Input ===
+  ##  x: data matrix of n*m, where n is the # of time points and m the number of wells
+  ##  d: design.matrix
+  ##  t: time, default = Time
+  ## Output ===
+  ##  a data frame object consisting of the variables T (time) OD (value) Strain Condition
+  
+  ## sanity check
+  if (length(t) != nrow(x))
+    stop("Length of Time != # rows of data!")
+  if (nrow(d) != ncol(x))
+    stop("# of conditions not matching # columns of data")
+  ## start processing
+  rownames(x) <- Time
+  melt.x <- melt(x)
+  names(melt.x) <- c("t","well","od")
+  cond <- d[rep( seq_len(ncol(x)), each=nrow(x) ), ]
+  melt.x <- cbind( melt.x, cond )
+  return( melt.x )
+}
+```
+
+3. Simple plotting function
+`simplot <- function(ex, mode="basic")` plot the raw data in either untransformed or log2 transformed format, can handle multiple wells simultaneously
+```{r Sub3, echo=FALSE}
+require(ggplot2)
+require(reshape2)
+simplot <- function(ex, mode="basic"){
+  # Input ==
+  #   ex: a dataframe of extracted OD values and the corresponding time points
+  #   mode: "basic"-simple x-y plot; "log"-y on log scale; "derivative"-first derivative using adjacent pair of values
+  if( class(mode) == "character" ){
+    mode = as.numeric(factor(mode, levels=c("basic","log","derivative")))
+  }
+  if( is.na(mode) ){
+    warning("Mode should be basic/log/derivative")
+  }
+  t = ex[,1]
+  x = as.matrix(ex[,-1])
+  # basic
+  if( mode == 1 ){
+    ylab="OD600"
+  }
+  if( mode == 2 ){
+    ylab="log2( OD600 )"
+    # convert to log2 scale, normalized by the first time point
+    x <- apply( x, 2, function(xx) return(xx/xx[1]) )
+    x <- log2(x) 
+  }
+  if( mode == 3 ){
+    ylab="d_log2( OD600 )"
+    x <- apply( x, 2, function(xx) return(xx/xx[1]) )
+    x <- log2(x) 
+    x <- x[-1,] - x[-nrow(x),]
+    t <- t[-1]
+  }
+  x.plot <- melt(x, varnames=c("t","well"))
+  x.plot$t <- t[ x.plot$t ]
+  qplot(t, value, data=x.plot, color=well, geom="line", xlab="Time (hr)", ylab=ylab)
+  # derivative
+}
+```
+
+4. Estimate growth rate
+```{r Sub4, echo=FALSE}
+growthRate <- function(ex, span=2, plot=TRUE){
+  # Purpose ==
+  #   Estimate the doubling time from growth curve
+  # Input ==
+  #   ex: data frame, with od and time
+  #   span: number of hours to extend on each side of the maximum growth rate point to do linear fitting
+  #         to be converted to units of time unit between adjacent measurements
+  # Output ==
+  #   0. return two doubling time estimates: (1) maximum growth rate (2) linear fit
+  #   1. plot either the log2(OD)~Time and show the linear fit (mode=1) or plot the Growth rate in units of min per doubling by calculating the slope based on any adjacent pair of points (mode=2)
+  #   2. If mode=1, return the doubling time in unit of min
+  ex.log = log2(ex$od/ex$od[1]); len = length(ex.log)
+  time = ex$t; unit.t = time[2] - time[1]; span <- span / unit.t
+  # a. find the maximum growth rate point
+  ex.diff = numeric(len)
+  ex.diff[1] = ex.log[2] - ex.log[1]
+  ex.diff[2:(len-1)] = (ex.log[3:len] - ex.log[1:(len-2)]) / 2
+  ex.diff[len] = ex.log[len] - ex.log[len-1]
+  max.p <- which.max(ex.diff)
+  span.p <- seq(max(1,max.p-span), min(max.p+span,len), 1)
+  max.rate <- max(ex.diff) / unit.t
+  if( sum(ex.diff[span.p] < 0) >= 8 ){
+    max.rate <- -1000
+  }
+  # diagnostic plot
+  if( plot ){
+    p <- ggplot(ex, aes(t, log2(od))) + geom_point() + geom_smooth(method=lm, data=ex[span.p,])
+    print(p)
+  }
+  # linear fit method
+  fit <- lm( ex.log[span.p] ~ time[span.p] )
+  doubling.time <- c(1/coef(fit)[2] * 60, 1 / max.rate * 60)
+  names(doubling.time) <- c("linear", "max")
+  return( "doubling time" = doubling.time )
+}
+```
+
+Analyse
+-----------------
+
+### 1. Overview and comparisons between strains / conditions
+```{r Strain by condition overview, echo=FALSE, fig.width=10, fig.height=10}
+## melt the data
+melt.data <- myMelt(data, design.mat)
+p <- ggplot(subset(melt.data, strain!="empty" & t <= 20), aes( t, od, group=well, color=condition ))
+p + geom_line() + facet_wrap(~strain, ncol=2)
+```
+
+### 2. Estimate growth rate from the curve
+In this section, I would like to compute two statistics for each growth curve
+(1) Growth rate during the exponential stage, and
+(2) Final biomass yield
+
+For #1, the procedures are as follows
+* Determine the linear range (there should be little lag time)
+* Linear fit on log2(OD) ~ Time(hr)
+* Extract the doubling time by calculating 1/coef(fit)[2]
+* An alternative method is to calculate the derivative at discreet time points and take the maximum rate
+
+```{r Measure growth rates, echo=FALSE, fig.width=10, fig.height=6}
+## calculate growth rate for each experiment
+span = 1.5 # extend on each side of the max growth rate point to do a linear fitting, unit=hr 
+rate = matrix(-1, nrow=ncol(data), ncol=2)
+rng = 2:(nrow(data)-1)
+for (i in 1:ncol(data)){
+  tmp <- data.frame( t=Time[rng], od=data[rng,i] )
+  rate[i, ] <- growthRate(tmp, span, FALSE)
+}
+Rate <- data.frame(design.mat, linear=rate[,1], max=rate[,2])
+Rate <- subset(Rate, strain!="empty" & condition!="SD 10mM Pi")
+
+# Summarize in table form
+# ===============
+rate.mean <- aggregate(Rate[,"linear"], Rate[,c("strain","condition")], mean)
+rate.rng <- aggregate(Rate[,"linear"], Rate[,c("strain","condition")], range)
+rate.agg <- data.frame(rate.mean, rate.rng$x)
+names(rate.agg)[3:5] = c("mean","lower","upper")
+rate.table <- dcast(rate.agg, strain~condition, value.var="mean")
+print(rate.table)
+
+rng <- aes(ymin=lower, ymax=upper, color=strain)
+# Plot data  
+# a==============a
+p <- ggplot( rate.agg, aes("Strains", mean, fill=strain) ) 
+p + geom_bar(stat="identity", position=position_dodge(0.9)) + scale_y_continuous(limits=c(0,110)) + facet_grid(.~condition) + xlab(NULL) + ylab("Doubling time [min]") + geom_errorbar(rng, position=position_dodge(0.9), width=0.25)
+```
