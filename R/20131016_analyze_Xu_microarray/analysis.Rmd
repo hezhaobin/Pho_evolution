@@ -1,0 +1,21 @@
+Analyze Xu's microarray data
+========================================================
+
+This script analyzes Xu's microarray data published in Zhou and O'Shea 2011, supplementary table 3
+The goal is to understand genes induced by phosphate starvation either dependent or independent of Pho4
+
+```{r Read_data}
+setwd("~/Documents/work/Pho/Result/RNA-seq/Xu_microarray_Scer")
+data <- read.table("sup_tab_3.txt",head=T,as.is=T)
+require(pheatmap)
+```
+
+_A large number of the genes respond to Pi starvation, but are not regulated by Pho4_
+```{r heatmap, echo=FALSE, fig.height=10}
+pvalue.col <- grep("p.",names(data))
+pvalues <- data[pvalue.col]; rownames(pvalues) <- data[,2]
+pheatmap(-log10(pvalues+.001),cluster_cols=FALSE,treeheight_row=0,legend_breaks=seq(0,3),legend_labels=c("1","0.1","0.01","<0.001"),cellheight=8,fontsize=8) -> x
+row.order <- x$tree_row$order
+print(data[row.order,c(2,pvalue.col[-1])])
+```
+
