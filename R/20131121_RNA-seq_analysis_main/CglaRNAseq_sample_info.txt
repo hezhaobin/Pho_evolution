@@ -1,0 +1,13 @@
+N1	pho80	14,461,095
+N2	pho80	11,346,077
+O1	pho80.pho4	16,770,794
+O2	pho80.pho4	12,547,501
+P1	pho80.scPho4	14,536,353
+P2	pho80.scPho4	14,915,709
+Q1	pho80.pho2	13,782,943
+Q2	pho80.pho2	9,452,288
+R1	pho80.scPho4.pho2	18,245,396
+W1	wt.highPi	7,233,831
+W2	wt.highPi	8,190,202
+W3	wt.lowPi	8,846,956
+W4	wt.lowPi	8,663,380

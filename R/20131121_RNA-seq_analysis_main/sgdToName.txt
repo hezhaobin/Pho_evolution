@@ -1,0 +1,1 @@
+../../../Data/Genome_annotation/S288C_reference_genome_R64-1-1_20110203/sgdToName.txt

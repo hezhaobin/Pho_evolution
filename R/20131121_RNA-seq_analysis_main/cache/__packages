@@ -1,0 +1,10 @@
+base
+BiocGenerics
+DESeq2
+GenomicRanges
+IRanges
+knitr
+limma
+Rcpp
+RcppArmadillo
+XVector

@@ -1,0 +1,34 @@
+# Species: Cgla - Candida glabrata; 
+# 	Scer - S. cerevisiae; 
+# 	Selo - Synechococcus elongatus
+# INDEX: TruSeq RNA adapter index
+# Sample: indicate which of the two samples
+Species	Sample_ID	INDEX	Sample	Index_Seq	
+Cgla	S1	2	A	CGATGT
+Cgla	S2	3	A	TTAGGC
+Cgla	T1	4	A	TGACCA
+Cgla	T2	5	A	ACAGTG
+Cgla	U1	6	A	GCCAAT
+Cgla	R2	7	A	CAGATC
+Scer	V2	9	A	GATCAG
+Cgla	U2	12	A	CTTGTA
+Scer	F2	13	A	AGTCAA
+Scer	G2	14	A	AGTTCC
+Scer	H2	15	A	CCGTCC
+Scer	I2	16	A	CCGTCC
+Scer	J2	18	A	GTCCGC
+Scer	K2	19	A	GTGAAA
+Scer	X1	2	B	CGATGT
+Scer	X2	4	B	TGACCA
+Scer	X3	5	B	ACAGTG
+Scer	X4	6	B	GCCAAT
+Scer	V1	8	B	ACTTGA
+Scer	Y1	13	B	AGTCAA
+Scer	Y2	14	B	AGTTCC
+Scer	L2	20	B	GTGGCC
+Scer	M2	21	B	GTTTCG
+Cgla	W1	22	B	CGTACG
+Cgla	W2	23	B	GAGTGG
+Cgla	W3	25	B	ACTGAT
+Cgla	W4	27	B	ATTCCT
+Selo	Z1	11	B	GGCTAC
