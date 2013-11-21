@@ -7,10 +7,10 @@ hebin
 18 nov 2013
 Read data
 ------------------
-```{r Read_Data, message=FALSE, cache=TRUE}
+```{r Read_Data, message=FALSE, echo=FALSE, cache=TRUE}
 library(limma)  # note: here the loading order is important. If limma is loaded last, it will mask the plotMA function
 library(DESeq2) #       from DESeq2
-setwd("~/Documents/work/Pho/Result/RNA-seq/main")
+setwd("~/Documents/work/Pho/Result/RNA-seq/Main")
 # Scer
 sc.sense <- read.csv("ScerRNAseq_sense.csv",row.names=1)
 # sc.anti <- read.csv("ScerRNAseq_anti.csv",row.names=1)
@@ -101,37 +101,114 @@ compList <- function(listA, listB, total=0){
 ```
 
 ### 2. Actual analysis of the data
-#### 2.1 Compare scPho4 targets in _pho80_ vs. under starvation
-_Question: what genes are regulated in common vs. differently?_
-```{r pho80_vs_starve_Scer, cache=TRUE, message=FALSE, echo=FALSE, fig.width=10, fig.height=5 }
+#### 2.1 Compare scPho4 targets in _pho80_ vs. under starvation in Scer
+_Question: what genes change their expression in pho80 bg vs. those under starvation? Which of them are PHO genes, i.e. dependent on Pho4?_
+```{r DESeq_in_Scer, cache=TRUE, message=FALSE, echo=FALSE }
+baseTh <- 100
+# naming conventions: species.pho4.comment.object
+
 # Identify genes in pho80
 cat("Identify genes in pho80_del in Scer...")
-# naming conventions: species.pho4.comment.object
 dds <- list( sc.sc4.no80 = PairwiseDE2( sc.sense, sc.info$Genotype, "wt.highPi", "pho80" ) )
 res <- list( sc.sc4.no80 = results(dds[[1]]) )
-sig <- list( sc.sc4.no80 = sigGene(res$sc.sc4.no80,baseMean=100) )
-sigd <- list( sc.sc4.no80 = sigGene(res$sc.sc4.no80,direction="down",baseMean=100) )
+sig <- list( sc.sc4.no80 = sigGene(res$sc.sc4.no80,baseMean=baseTh))
+sigd <- list( sc.sc4.no80 = sigGene(res$sc.sc4.no80,direction="down",baseMean=baseTh))
 gene <- list( sc.sc4.no80 = sc.genes[ sig$sc.sc4.no80 ] )
+
 # Identify genes under starvation
 cat("Identify genes under starvation in Scer...")
 dds$sc.sc4.noPi <- PairwiseDE2( sc.sense, sc.info$Genotype, "wt.highPi", "wt.lowPi")
 res$sc.sc4.noPi <- results(dds[[2]])
-sig$sc.sc4.noPi <- sigGene(res[[2]], baseMean=100)
-sigd$sc.sc4.noPi <- sigGene(res[[2]], direction="down", baseMean=100)
+sig$sc.sc4.noPi <- sigGene(res[[2]], baseMean=baseTh)
+sigd$sc.sc4.noPi <- sigGene(res[[2]], direction="down", baseMean=baseTh)
 gene$sc.sc4.noPi = sc.genes[ sig$sc.sc4.noPi ]
+
+# Identify genes dependent on Pho4
+cat("Identify genes dependent on Pho4 in pho80- bg in Scer...")
+dds$sc.sc4.no4 <- PairwiseDE2( sc.sense, sc.info$Genotype, "pho80.pho4", "pho80")
+res$sc.sc4.no4 <- results(dds[[3]])
+sig$sc.sc4.no4 <- sigGene(res[[3]], baseMean=baseTh)
+sigd$sc.sc4.no4 <- sigGene(res[[3]], direction="down", baseMean=baseTh)
+gene$sc.sc4.no4 = sc.genes[ sig$sc.sc4.no4 ]
+
+# Identify genes dependent on Pho4 by comparing gene induction in pho80 with or without Pho4
+cat("Identify genes dependent on Pho4 in pho80- bg in Scer...")
+dds$sc.sc4.no80no4 <- PairwiseDE2( sc.sense, sc.info$Genotype,"wt.highPi", "pho80.pho4")
+res$sc.sc4.no80no4 <- results(dds[[4]])
+sig$sc.sc4.no80no4 <- sigGene(res[[4]], baseMean=baseTh)
+sigd$sc.sc4.no80no4 <- sigGene(res[[4]], direction="down", baseMean=baseTh)
+gene$sc.sc4.no80no4 = sc.genes[ sig$sc.sc4.no80no4 ]
+```
+
+```{r plotMA_Scer, echo=FALSE, fig.width=10, fig.height=12 }
 # compare pho80 and starvation
 comp <- list( sc.sc4.no80_noPi = table( "pho80"=sig[[1]], "noPi"=sig[[2]] ) )
 cat("Compare pho80- and Pi starvation genes")
 print( addmargins(comp[[1]]) ) # print overlaps
-layout(matrix(1:2,ncol=2)) # MA plots.
-plotMA( dds$sc.sc4.no80, pvalCutoff=.05, main="pho80 bg");abline(v=100,h=1,lty=2)
-plotMA( dds$sc.sc4.noPi, pvalCutoff=.05, main="Pi starve");abline(v=100,h=1,lty=2)
+layout(matrix(1:4,ncol=2)) # MA plots.
+DESeq2::plotMA( dds$sc.sc4.no80, pvalCutoff=.01, ylim=c(-6.64,6.64), main="pho80 / wt.highPi");abline(v=100,h=1,lty=2)
+DESeq2::plotMA( dds$sc.sc4.noPi, pvalCutoff=.01, ylim=c(-6.64,6.64), main="wt noPi / highPi");abline(v=100,h=1,lty=2)
+DESeq2::plotMA( dds$sc.sc4.no80no4, pvalCutoff=.01, ylim=c(-6.64,6.64), main="pho80 pho4 / wt.highPi");abline(v=100,h=1,lty=2)
+DESeq2::plotMA( dds$sc.sc4.no4, pvalCutoff=.01, ylim=c(-6.64,6.64), main="pho80 / pho80 pho4");abline(v=100,h=1,lty=2)
+```
+
+```{r Scer_compare_gene_set_overlap}
 cat( "Genes defined by Xu and found in starvation conditions ...")
 tmp <- compList( gene$sc.sc4.no80, gene$sc.sc4.noPi, 6603 )
-gene.list <- cbind( sig$sc.sc4.no80, sig$sc.sc4.noPi, FALSE )
-rownames(gene.list) <- sc.genes; colnames(gene.list) <- c("pho80", "no Pi", "Xu Pho4-genes")
-gene.list[ Xu.genes, 3 ] <- TRUE
-vennCounts <- vennCounts(gene.list)
+gene.list <- cbind( sig$sc.sc4.no80, sig$sc.sc4.noPi, sig$sc.sc4.no80 & !sig$sc.sc4.no80no4, FALSE )
+rownames(gene.list) <- sc.genes; colnames(gene.list) <- c("pho80", "no Pi", "require Pho4", "Xu Pho4-genes")
+gene.list[ all.80, 4 ] <- TRUE
+vennCounts <- vennCounts(gene.list[,-1])
 vennDiagram( vennCounts, circle.col=c("black","blue","green") )
+```
+
+#### 2.2 Compare cgPho4 targets in _pho80_ vs. under starvation in Cgla
+```{r DESeq_in_Cgla, cache=TRUE, message=FALSE, echo=FALSE }
+baseTh <- 100
+# naming conventions: species.pho4.comment.object
+
+# Identify genes in pho80
+cat("Identify genes in pho80_del in Cgla...")
+dds$cg.cg4.no80 = PairwiseDE2( cg.sense, cg.info$Genotype, "wt.highPi", "pho80" ) 
+res$cg.cg4.no80 = results(dds[[1]]) 
+sig$cg.cg4.no80 = sigGene(res$cg.cg4.no80,baseMean=baseTh)
+sigd$cg.cg4.no80 = sigGene(res$cg.cg4.no80,direction="down",baseMean=baseTh)
+gene$cg.cg4.no80 = cg.genes[ sig$cg.cg4.no80 ] 
+
+# Identify genes under starvation
+cat("Identify genes under starvation in Cgla...")
+dds$cg.cg4.noPi <- PairwiseDE2( cg.sense, cg.info$Genotype, "wt.highPi", "wt.lowPi")
+res$cg.cg4.noPi <- results(dds[[2]])
+sig$cg.cg4.noPi <- sigGene(res[[2]], baseMean=baseTh)
+sigd$cg.cg4.noPi <- sigGene(res[[2]], direction="down", baseMean=baseTh)
+gene$cg.cg4.noPi = cg.genes[ sig$cg.cg4.noPi ]
+
+# Identify genes dependent on Pho4
+cat("Identify genes dependent on Pho4 in pho80- bg in cgla...")
+dds$cg.cg4.no4 <- PairwiseDE2( cg.sense, cg.info$Genotype, "pho80.pho4", "pho80")
+res$cg.cg4.no4 <- results(dds[[3]])
+sig$cg.cg4.no4 <- sigGene(res[[3]], baseMean=baseTh)
+sigd$cg.cg4.no4 <- sigGene(res[[3]], direction="down", baseMean=baseTh)
+gene$cg.cg4.no4 = cg.genes[ sig$cg.cg4.no4 ]
+
+# Identify genes dependent on Pho4 by comparing gene induction in pho80 with or without Pho4
+cat("Identify genes dependent on Pho4 in pho80- bg in cgla...")
+dds$cg.cg4.no80no4 <- PairwiseDE2( cg.sense, cg.info$Genotype,"wt.highPi", "pho80.pho4")
+res$cg.cg4.no80no4 <- results(dds[[4]])
+sig$cg.cg4.no80no4 <- sigGene(res[[4]], baseMean=baseTh)
+sigd$cg.cg4.no80no4 <- sigGene(res[[4]], direction="down", baseMean=baseTh)
+gene$cg.cg4.no80no4 = cg.genes[ sig$cg.cg4.no80no4 ]
+```
+
+```{r plotMA_Cgla, echo=FALSE, fig.width=10, fig.height=12 }
+# compare pho80 and starvation
+comp$cg.cg4.no80_noPi = table( "pho80"=sig[[1]], "noPi"=sig[[2]] ) 
+cat("Compare pho80- and Pi starvation genes")
+print( addmargins(comp[[1]]) ) # print overlaps
+layout(matrix(1:4,ncol=2)) # MA plots.
+DESeq2::plotMA( dds$cg.cg4.no80, pvalCutoff=.01, ylim=c(-6.64,6.64), main="pho80 / wt.highPi");abline(v=100,h=1,lty=2)
+DESeq2::plotMA( dds$cg.cg4.noPi, pvalCutoff=.01, ylim=c(-6.64,6.64), main="wt noPi / highPi");abline(v=100,h=1,lty=2)
+DESeq2::plotMA( dds$cg.cg4.no80no4, pvalCutoff=.01, ylim=c(-6.64,6.64), main="pho80 pho4 / wt.highPi");abline(v=100,h=1,lty=2)
+DESeq2::plotMA( dds$cg.cg4.no4, pvalCutoff=.01, ylim=c(-6.64,6.64), main="pho80 / pho80 pho4");abline(v=100,h=1,lty=2)
 ```
 
